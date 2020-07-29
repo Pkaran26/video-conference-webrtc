@@ -3,28 +3,14 @@ const myPeer = new Peer(undefined, {
   host: '/',
   port: 3001
 })
-const { useState, useEffect, useRef, Fragment } = React
+const { useState, useEffect, useRef, Fragment, Component } = React
 
-const VideoGrid = ({ videos })=>(
-  <div className="row">
-    { videos && videos.length>0?
-      videos.map((e, i)=>(
-        <Video
-          key={ i }
-          stream={ e.stream }
-          username={ e.username }
-          mute={ e.mute? e.mute : false }
-        />
-      ))
-    :null }
-  </div>
-)
-
-const Video = ({ stream, username, mute })=>{
+const Video = ({ stream, username, mute, userId, returnfunc })=>{
   const video = useRef()
 
   useEffect(()=>{
     if(stream && video && video.current){
+      returnfunc(userId, video)
       const { current } = video
       if(mute){
         current.mute = true
@@ -48,45 +34,77 @@ const Video = ({ stream, username, mute })=>{
   )
 }
 
-const Room = ()=>{
-  const [username, setUsername] = useState('')
-  const [streams, setStreams] = useState([])
-  const [peers, setPeers] = useState({})
+class Room extends Component {
+  constructor(){
+    super()
+    this.state = {
+      username: '',
+      streams: [],
+      peers: {},
+      refs: {}
+    }
+  }
 
-  useEffect(()=>{
+  setStreams = (stream)=>{
+    const { streams } = this.state
+    this.setState({
+      streams: [...streams, stream]
+    })
+  }
+
+  setPeers = (userId, call)=>{
+    let { peers } = this.state
+    peers = {
+      ...peers,
+      [userId]: call
+    }
+
+    this.setState({
+      peers: peers
+    })
+  }
+
+  setRefs = (userId, ref)=>{
+    let { refs } = this.state
+    refs = {
+      ...refs,
+      [userId]: ref
+    }
+
+    this.setState({
+      refs: refs
+    })
+  }
+
+  componentDidMount(){
     navigator.mediaDevices.getUserMedia({
       video: true,
       audio: true
     }).then(stream=>{
-      setStreams([
-        ...streams,
-        {
-          stream: stream,
-          username: "Prateek",
-          mute: true
-        }
-      ])
+      this.setStreams({
+        stream: stream,
+        username: "Prateek",
+        mute: true
+      })
 
       myPeer.on('call', call=>{
         call.answer(stream)
         call.on('stream', userVideoStream=>{
-          setStreams([
-            ...streams,
-            {
-              stream: userVideoStream,
-              username: "Prateek"
-            }
-          ])
+          this.setStreams({
+            stream: userVideoStream,
+            username: "Prateek"
+          })
         })
       })
 
       socket.on('user-connected', userId=>{
-        connectToNewUser(userId, stream)
+        this.connectToNewUser(userId, stream)
       })
     })
 
     socket.on('user-disconnected', userId=>{
       console.log(userId)
+      const { peers } = this.state
       if (peers[userId]){
         peers[userId].close()
       }
@@ -95,42 +113,55 @@ const Room = ()=>{
     myPeer.on('open', id=>{
       socket.emit('join-room', ROOM_ID, id)
     })
-  }, [])
+  }
 
-  const connectToNewUser = (userId, stream)=>{
+  connectToNewUser = (userId, stream)=>{
     const call = myPeer.call(userId, stream)
 
     call.on('stream', userVideoStream=>{
       console.log('new user');
-      setStreams([
-        ...streams,
-        {
-          stream: userVideoStream,
-          username: "Prateek"
-        }
-      ])
+      this.setStreams({
+        stream: userVideoStream,
+        username: "Prateek",
+        userId,
+      })
     })
 
     call.on('close', ()=>{
-      video.remove()
+      // video.remove()
+
+      const { refs } = this.state
+      if (refs[userId]){
+        refs[userId].remove()
+      }
     })
 
-    setPeers({
-      ...peers,
-      [userId]: call
-    })
+    this.setPeers(userId, call)
   }
 
-  return(
+  render(){
+    const { streams } = this.state
+    return(
     <Fragment>
       <window.Header />
       <div className="container">
-        <VideoGrid
-          videos={ streams }
-        />
+        <div className="row">
+        { streams && streams.length>0?
+          streams.map((e, i)=>(
+            <Video
+              key={ i }
+              stream={ e.stream }
+              username={ e.username }
+              mute={ e.mute? e.mute : false }
+              returnfunc={ this.setRefs }
+            />
+          ))
+        :null }
+        </div>
       </div>
     </Fragment>
   )
+  }
 }
 
 ReactDOM.render(<Room />, document.getElementById('root'))
